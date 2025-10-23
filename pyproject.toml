@@ -1,0 +1,17 @@
+[project]
+name = "adxl366-i2c-streaming"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "intelhex>=2.3.0",
+    "pip>=25.2",
+    "pyelftools>=0.32",
+    "west>=1.5.0",
+]
+
+[tool.uv.workspace]
+members = [
+    "tools",
+]
