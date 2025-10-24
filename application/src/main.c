@@ -2,6 +2,8 @@
 
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/addr.h>
 #include <zephyr/device.h>
 #include "adxl367.h"
 #include <zephyr/drivers/sensor.h>
@@ -46,6 +48,55 @@ static const struct bt_data ad[] = {
 
 static const struct bt_data sd[] = {
 	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
+};
+
+static int start_advertising(void)
+{
+	int err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+
+	if (err && err != -EALREADY) {
+		LOG_ERR("Advertising start failed (%d)", err);
+		return err;
+	}
+
+	if (!err) {
+		LOG_INF("Bluetooth advertising started");
+	}
+
+	return 0;
+}
+
+static void connected(struct bt_conn *conn, uint8_t err)
+{
+	char addr[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+	if (err) {
+		LOG_ERR("Connection to %s failed (0x%02x)", addr, err);
+		return;
+	}
+
+	LOG_INF("Connected to %s", addr);
+}
+
+static void disconnected(struct bt_conn *conn, uint8_t reason)
+{
+	char addr[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+	LOG_INF("Disconnected from %s (reason 0x%02x)", addr, reason);
+
+	int err = start_advertising();
+	if (err) {
+		LOG_ERR("Failed to resume advertising (%d)", err);
+	}
+}
+
+BT_CONN_CB_DEFINE(conn_callbacks) = {
+	.connected = connected,
+	.disconnected = disconnected,
 };
 
 static double adxl36x_odr_hz(const struct device *dev)
@@ -101,12 +152,7 @@ static void bluetooth_ready(int err)
 		return;
 	}
 
-	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-	if (err) {
-		LOG_ERR("Advertising start failed (%d)", err);
-	} else {
-		LOG_INF("Bluetooth advertising started");
-	}
+	(void)start_advertising();
 
 	k_sem_give(&bt_ready_sem);
 }
