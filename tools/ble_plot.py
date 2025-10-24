@@ -55,6 +55,7 @@ class AccelerometerPlotter:
             maxlen=history_length
         )
         self.lock_scale = False
+        self.remove_gravity = False
 
         plt.ion()
         self.fig, self.axes = plt.subplots(3, 1, sharex=True)
@@ -72,8 +73,12 @@ class AccelerometerPlotter:
         self.axes[-1].set_xlabel("Time (s)")
         self.fig.subplots_adjust(bottom=0.18)
 
-        button_ax = self.fig.add_axes([0.72, 0.05, 0.2, 0.06])
-        self.lock_button = Button(button_ax, "Lock Scale")
+        gravity_ax = self.fig.add_axes([0.43, 0.05, 0.22, 0.06])
+        self.gravity_button = Button(gravity_ax, "Remove Gravity")
+        self.gravity_button.on_clicked(self._toggle_gravity)
+
+        lock_ax = self.fig.add_axes([0.72, 0.05, 0.2, 0.06])
+        self.lock_button = Button(lock_ax, "Lock Scale")
         self.lock_button.on_clicked(self._toggle_scale_lock)
 
         self.fig.tight_layout(rect=[0, 0.08, 1, 1])
@@ -95,17 +100,25 @@ class AccelerometerPlotter:
             self._history.popleft()
 
         times = [sample[0] - self._history[0][0] for sample in self._history]
-        axis_samples = list(zip(*(sample[1:] for sample in self._history)))
+        axis_samples = [list(samples) for samples in zip(*(sample[1:] for sample in self._history))]
+
+        if self.remove_gravity:
+            processed_samples = []
+            for values in axis_samples:
+                mean = sum(values) / len(values)
+                processed_samples.append([value - mean for value in values])
+        else:
+            processed_samples = axis_samples
 
         shared_limits = None
         if self.lock_scale:
-            v_min = min(min(values) for values in axis_samples)
-            v_max = max(max(values) for values in axis_samples)
+            v_min = min(min(values) for values in processed_samples)
+            v_max = max(max(values) for values in processed_samples)
             span = max(1e-3, v_max - v_min)
             padding = max(0.25, span * 0.15)
             shared_limits = (v_min - padding, v_max + padding)
 
-        for axis, line, values in zip(self.axes, self.lines, axis_samples):
+        for axis, line, values in zip(self.axes, self.lines, processed_samples):
             line.set_data(times, values)
 
             if shared_limits:
@@ -128,6 +141,13 @@ class AccelerometerPlotter:
         self.lock_scale = not self.lock_scale
         label = "Unlock Scale" if self.lock_scale else "Lock Scale"
         self.lock_button.label.set_text(label)
+        if self._history:
+            self.render()
+
+    def _toggle_gravity(self, _event) -> None:
+        self.remove_gravity = not self.remove_gravity
+        label = "Include Gravity" if self.remove_gravity else "Remove Gravity"
+        self.gravity_button.label.set_text(label)
         if self._history:
             self.render()
 
