@@ -3,6 +3,7 @@
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/device.h>
+#include "adxl367.h"
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -46,6 +47,32 @@ static const struct bt_data ad[] = {
 static const struct bt_data sd[] = {
 	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
 };
+
+static double adxl36x_odr_hz(const struct device *dev)
+{
+	static const double odr_table[] = {12.5, 25.0, 50.0, 100.0, 200.0, 400.0};
+	enum adxl367_odr odr = ADXL367_ODR_12P5HZ;
+
+	if (!device_is_ready(dev)) {
+		return odr_table[odr];
+	}
+
+#if IS_ENABLED(CONFIG_ADXL367_STREAM)
+	const struct adxl367_data *data = dev->data;
+
+	odr = data->odr;
+#else
+	const struct adxl367_dev_config *cfg = dev->config;
+
+	odr = cfg->odr;
+#endif
+
+	if (odr >= ARRAY_SIZE(odr_table)) {
+		return odr_table[ADXL367_ODR_12P5HZ];
+	}
+
+	return odr_table[odr];
+}
 
 struct accel_sample {
 	float x;
@@ -116,6 +143,7 @@ int main(void)
 	}
 
 	LOG_INF("Accelerometer ready, streaming acceleration samples");
+	LOG_INF("Accelerometer sampling rate set to %.1f Hz", adxl36x_odr_hz(dev));
 
 	err = bt_enable(bluetooth_ready);
 	if (err) {

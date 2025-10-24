@@ -5,6 +5,7 @@
 	adxl36x: adxl366@0 {
 		compatible = "adi,adxl366";
 		reg = <0>;
+		odr = <3>; // 100 Hz
 		spi-max-frequency = <4000000>;
 		int1-gpios = <&gpio1 5 GPIO_ACTIVE_HIGH>;
 		status = "okay";

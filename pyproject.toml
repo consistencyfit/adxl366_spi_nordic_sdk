@@ -1,5 +1,5 @@
 [project]
-name = "adxl366-i2c-streaming"
+name = "adxl366_spi_nordic_sdk"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
