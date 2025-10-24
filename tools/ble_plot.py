@@ -20,6 +20,7 @@ import time
 
 try:
     import matplotlib.pyplot as plt
+    from matplotlib.widgets import Button
 except ImportError as exc:  # pragma: no cover - dependency hint
     print(
         "matplotlib is required to run this script. "
@@ -53,6 +54,7 @@ class AccelerometerPlotter:
         self._history: deque[tuple[float, float, float, float]] = deque(
             maxlen=history_length
         )
+        self.lock_scale = False
 
         plt.ion()
         self.fig, self.axes = plt.subplots(3, 1, sharex=True)
@@ -68,7 +70,13 @@ class AccelerometerPlotter:
             axis.axhline(0.0, color="0.4", linewidth=0.6, linestyle=":")
 
         self.axes[-1].set_xlabel("Time (s)")
-        self.fig.tight_layout()
+        self.fig.subplots_adjust(bottom=0.18)
+
+        button_ax = self.fig.add_axes([0.72, 0.05, 0.2, 0.06])
+        self.lock_button = Button(button_ax, "Lock Scale")
+        self.lock_button.on_clicked(self._toggle_scale_lock)
+
+        self.fig.tight_layout(rect=[0, 0.08, 1, 1])
         plt.show()
 
     def add_sample(self, timestamp: float, x: float, y: float, z: float) -> None:
@@ -89,14 +97,25 @@ class AccelerometerPlotter:
         times = [sample[0] - self._history[0][0] for sample in self._history]
         axis_samples = list(zip(*(sample[1:] for sample in self._history)))
 
+        shared_limits = None
+        if self.lock_scale:
+            v_min = min(min(values) for values in axis_samples)
+            v_max = max(max(values) for values in axis_samples)
+            span = max(1e-3, v_max - v_min)
+            padding = max(0.25, span * 0.15)
+            shared_limits = (v_min - padding, v_max + padding)
+
         for axis, line, values in zip(self.axes, self.lines, axis_samples):
             line.set_data(times, values)
 
-            v_min = min(values)
-            v_max = max(values)
-            span = max(1e-3, v_max - v_min)
-            padding = max(0.25, span * 0.15)
-            axis.set_ylim(v_min - padding, v_max + padding)
+            if shared_limits:
+                axis.set_ylim(shared_limits)
+            else:
+                v_min = min(values)
+                v_max = max(values)
+                span = max(1e-3, v_max - v_min)
+                padding = max(0.25, span * 0.15)
+                axis.set_ylim(v_min - padding, v_max + padding)
 
         x_max = max(self.window, times[-1] if times else self.window)
         for axis in self.axes:
@@ -104,6 +123,13 @@ class AccelerometerPlotter:
 
         self.fig.canvas.draw_idle()
         plt.pause(0.001)
+
+    def _toggle_scale_lock(self, _event) -> None:
+        self.lock_scale = not self.lock_scale
+        label = "Unlock Scale" if self.lock_scale else "Lock Scale"
+        self.lock_button.label.set_text(label)
+        if self._history:
+            self.render()
 
 
 class AccelerometerStream:
