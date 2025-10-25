@@ -22,6 +22,11 @@ LOG_MODULE_REGISTER(app);
 #define BT_UUID_ACCEL_MEASUREMENT BT_UUID_DECLARE_128(BT_UUID_ACCEL_MEASUREMENT_VAL)
 
 static bool accel_notify_enabled;
+static struct bt_conn *default_conn;
+
+static void conn_param_update_work_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(conn_param_update_work,
+			       conn_param_update_work_handler);
 
 static void accel_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
@@ -78,6 +83,19 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	}
 
 	LOG_INF("Connected to %s", addr);
+
+	if (default_conn) {
+		bt_conn_unref(default_conn);
+		default_conn = NULL;
+	}
+
+	default_conn = bt_conn_ref(conn);
+
+	int rc = k_work_reschedule(&conn_param_update_work, K_MSEC(100));
+
+	if (rc < 0) {
+		LOG_WRN("Failed to schedule connection parameter update (%d)", rc);
+	}
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -92,12 +110,39 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	if (err) {
 		LOG_ERR("Failed to resume advertising (%d)", err);
 	}
+
+	(void)k_work_cancel_delayable(&conn_param_update_work);
+
+	if (default_conn) {
+		bt_conn_unref(default_conn);
+		default_conn = NULL;
+	}
 }
 
 BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.connected = connected,
 	.disconnected = disconnected,
 };
+
+static void conn_param_update_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	struct bt_conn *conn = default_conn;
+
+	if (!conn) {
+		return;
+	}
+
+	int rc = bt_conn_le_param_update(conn, BT_LE_CONN_PARAM(6, 12, 0, 400));
+
+	if (rc) {
+		LOG_WRN("Failed to request connection parameter update (%d)", rc);
+	}
+
+	bt_conn_unref(conn);
+	default_conn = NULL;
+}
 
 static double adxl36x_odr_hz(const struct device *dev)
 {
@@ -189,7 +234,18 @@ int main(void)
 	}
 
 	LOG_INF("Accelerometer ready, streaming acceleration samples");
-	LOG_INF("Accelerometer sampling rate set to %.1f Hz", adxl36x_odr_hz(dev));
+	const double odr_hz = adxl36x_odr_hz(dev);
+	uint32_t sample_period_us = 0U;
+
+	if (odr_hz > 0.0) {
+		sample_period_us = (uint32_t)(1000000.0 / odr_hz);
+
+		if (sample_period_us == 0U) {
+			sample_period_us = 1U;
+		}
+	}
+
+	LOG_INF("Accelerometer sampling rate set to %.1f Hz", odr_hz);
 
 	err = bt_enable(bluetooth_ready);
 	if (err) {
@@ -197,6 +253,8 @@ int main(void)
 	} else {
 		k_sem_take(&bt_ready_sem, K_FOREVER);
 	}
+
+	int64_t next_log_ms = k_uptime_get() + 1000;
 
 	while (true) {
 		struct sensor_value accel[3];
@@ -215,23 +273,37 @@ int main(void)
 			continue;
 		}
 
-		LOG_INF("Accel [m/s^2]: X=%.3f Y=%.3f Z=%.3f | [g]: X=%.3f Y=%.3f Z=%.3f",
+		const double accel_ms2[3] = {
 			accel_to_ms2(&accel[0]),
 			accel_to_ms2(&accel[1]),
 			accel_to_ms2(&accel[2]),
-			accel_to_g(&accel[0]),
-			accel_to_g(&accel[1]),
-			accel_to_g(&accel[2]));
+		};
 
 		const struct accel_sample sample = {
-			.x = (float)accel_to_ms2(&accel[0]),
-			.y = (float)accel_to_ms2(&accel[1]),
-			.z = (float)accel_to_ms2(&accel[2]),
+			.x = (float)accel_ms2[0],
+			.y = (float)accel_ms2[1],
+			.z = (float)accel_ms2[2],
 		};
 
 		publish_accel(&sample);
 
-		k_sleep(K_MSEC(100));
+		if (k_uptime_get() >= next_log_ms) {
+			LOG_INF("Accel [m/s^2]: X=%.3f Y=%.3f Z=%.3f | [g]: X=%.3f Y=%.3f Z=%.3f",
+				accel_ms2[0],
+				accel_ms2[1],
+				accel_ms2[2],
+				accel_to_g(&accel[0]),
+				accel_to_g(&accel[1]),
+				accel_to_g(&accel[2]));
+
+			next_log_ms += 1000;
+		}
+
+		if (sample_period_us > 0U) {
+			k_usleep(sample_period_us);
+		} else {
+			k_yield();
+		}
 	}
 
 	return 0;
