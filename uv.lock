@@ -451,12 +451,14 @@ source = { virtual = "tools" }
 dependencies = [
     { name = "bleak" },
     { name = "matplotlib" },
+    { name = "numpy" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "bleak", specifier = ">=1.1.1" },
     { name = "matplotlib", specifier = ">=3.10.7" },
+    { name = "numpy", specifier = ">=1.26.0" },
 ]
 
 [[package]]
